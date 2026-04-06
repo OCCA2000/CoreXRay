@@ -15,7 +15,12 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
         # 2. Removes first 6 chars (COBOL line numbers)
         # 3. Removes trailing spaces and ignores empty lines
         lines = raw_text.split('\n')
-        cleaned_lines = [line[6:].rstrip() for line in lines if len(line.strip()) > 6]
+        keywords = ["FD", "CALL"]
+        cleaned_lines = []
+
+        for line in lines:
+            if any(key in line for key in keywords):
+                cleaned_lines.append(line)
         
         cleaned_text = "\n".join(cleaned_lines)
 
@@ -26,3 +31,4 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+
