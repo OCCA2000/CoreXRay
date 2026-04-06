@@ -3,8 +3,7 @@ import json
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-@app.function_name(name="CleanData")
-@app.http_trigger(arg_name="req", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="")
 def CleanData(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Get the text from the Logic App
