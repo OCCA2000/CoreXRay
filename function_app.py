@@ -93,6 +93,6 @@ def convert_to_pdf_with_fpdf(content: str) -> bytes:
     pdf.multi_cell(0, 10, txt=clean_content)
     
     # Get PDF as bytes
-    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+    pdf_bytes = pdf.output(dest='S')
     
     return pdf_bytes
