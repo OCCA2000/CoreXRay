@@ -11,29 +11,64 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 @app.route("", methods=["POST"])
 def CleanData(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        # Get the text from the Logic App
         req_body = req.get_json()
         raw_text = req_body.get('text', '')
-
-        # THE CLEANER: 
-        # 1. Split into lines
-        # 2. Removes first 6 chars (COBOL line numbers)
-        # 3. Removes trailing spaces and ignores empty lines
         lines = raw_text.split('\n')
-        keywords = ["FD", "CALL"]
-        cleaned_lines = []
+
+        structured = {
+            "calls": [],
+            "copybooks": [],
+            "files": [],
+            "tables": [],
+            "cics_transactions": [],
+        }
+        search_terms = set()
 
         for line in lines:
-            if any(key in line for key in keywords):
-                cleaned_lines.append(line)
-        
-        cleaned_text = "\n".join(cleaned_lines)
+            stripped = line.strip()
+            if not stripped or stripped.startswith('*'):
+                continue
+
+            # CALL → nombre del programa
+            m = re.search(r"CALL\s+['\"]?(\w+)['\"]?", stripped, re.IGNORECASE)
+            if m:
+                structured["calls"].append(m.group(1))
+                search_terms.add(m.group(1))          # ← solo el nombre
+
+            # COPY → nombre del copybook
+            m = re.search(r"COPY\s+(\w+)", stripped, re.IGNORECASE)
+            if m:
+                structured["copybooks"].append(m.group(1))
+                search_terms.add(m.group(1))
+
+            # FD → nombre del archivo
+            m = re.search(r"\bFD\s+(\S+)", stripped, re.IGNORECASE)
+            if m:
+                structured["files"].append(m.group(1))
+                search_terms.add(m.group(1))
+
+            # SQL FROM → nombre de tabla
+            m = re.search(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE)
+            if m:
+                structured["tables"].append(m.group(1))
+                search_terms.add(m.group(1))
+
+            # CICS TRANSID → ID de transacción
+            m = re.search(r"TRANSID\s*\(?['\"]?(\w+)['\"]?\)?", stripped, re.IGNORECASE)
+            if m:
+                structured["cics_transactions"].append(m.group(1))
+                search_terms.add(m.group(1))
 
         return func.HttpResponse(
-            json.dumps({"cleaned_text": cleaned_text}),
+            json.dumps({
+                "search_terms": ", ".join(search_terms),  # ← AI Search: corto y preciso
+                "structured": structured,                  # ← GPT: contexto completo
+                "cleaned_text": ", ".join(search_terms)   # ← compatibilidad con flujo actual
+            }),
             mimetype="application/json",
             status_code=200
         )
+
     except Exception as e:
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
 
