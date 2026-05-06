@@ -48,10 +48,10 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
                 search_terms.add(m.group(1))
 
             # FROM → nombre completo de tabla (con guiones)
-            m = re.search(r"\bFROM\s+([\w-]+)", stripped, re.IGNORECASE)
-            if m:
-                structured["tables"].append(m.group(1))
-                search_terms.add(m.group(1))
+            #m = re.search(r"\bFROM\s+([\w-]+)", stripped, re.IGNORECASE)
+            #if m:
+                #structured["tables"].append(m.group(1))
+                #search_terms.add(m.group(1))
 
             # CICS TRANSID → ID de transacción
             m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?", 
