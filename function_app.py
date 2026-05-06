@@ -24,6 +24,15 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
         }
         search_terms = set()
 
+        # Sufijos a remover de nombres de archivos COBOL
+        file_suffixes = [
+            '-FILE-IN', '-FILE-OUT',  # primero los más específicos
+            '-ARCHIVO-IN', '-ARCHIVO-OUT',
+            '-FILE', '-ARCHIVO',
+            '-INPUT', '-OUTPUT',
+            '-IN', '-OUT'
+        ]
+
         for line in lines:
             stripped = line.strip()
             if not stripped or stripped.startswith('*'):
@@ -41,20 +50,19 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
                 structured["copybooks"].append(m.group(1))
                 search_terms.add(m.group(1))
 
-            # FD → nombre completo del archivo (con guiones)
+            # FD → nombre limpio sin sufijos de archivo
             m = re.search(r"\bFD\s+([\w-]+)", stripped, re.IGNORECASE)
             if m:
-                structured["files"].append(m.group(1))
-                search_terms.add(m.group(1))
-
-            # FROM → nombre completo de tabla (con guiones)
-            #m = re.search(r"\bFROM\s+([\w-]+)", stripped, re.IGNORECASE)
-            #if m:
-                #structured["tables"].append(m.group(1))
-                #search_terms.add(m.group(1))
+                file_name = m.group(1)
+                for suffix in file_suffixes:
+                    if file_name.upper().endswith(suffix.upper()):
+                        file_name = file_name[:len(file_name)-len(suffix)]
+                        break
+                structured["files"].append(file_name)
+                search_terms.add(file_name)
 
             # CICS TRANSID → ID de transacción
-            m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?", 
+            m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?",
                          stripped, re.IGNORECASE)
             if m:
                 structured["cics_transactions"].append(m.group(1))
