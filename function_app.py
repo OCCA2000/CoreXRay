@@ -29,41 +29,42 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
             if not stripped or stripped.startswith('*'):
                 continue
 
-            # CALL → nombre del programa
-            m = re.search(r"CALL\s+['\"]?(\w+)['\"]?", stripped, re.IGNORECASE)
+            # CALL → nombre del programa (con guiones)
+            m = re.search(r"CALL\s+['\"]?([\w-]+)['\"]?", stripped, re.IGNORECASE)
             if m:
                 structured["calls"].append(m.group(1))
-                search_terms.add(m.group(1))          # ← solo el nombre
+                search_terms.add(m.group(1))
 
-            # COPY → nombre del copybook
-            m = re.search(r"COPY\s+(\w+)", stripped, re.IGNORECASE)
+            # COPY → nombre completo del copybook (con guiones)
+            m = re.search(r"COPY\s+([\w-]+)", stripped, re.IGNORECASE)
             if m:
                 structured["copybooks"].append(m.group(1))
                 search_terms.add(m.group(1))
 
-            # FD → nombre del archivo
-            m = re.search(r"\bFD\s+(\S+)", stripped, re.IGNORECASE)
+            # FD → nombre completo del archivo (con guiones)
+            m = re.search(r"\bFD\s+([\w-]+)", stripped, re.IGNORECASE)
             if m:
                 structured["files"].append(m.group(1))
                 search_terms.add(m.group(1))
 
-            # SQL FROM → nombre de tabla
-            m = re.search(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE)
+            # FROM → nombre completo de tabla (con guiones)
+            m = re.search(r"\bFROM\s+([\w-]+)", stripped, re.IGNORECASE)
             if m:
                 structured["tables"].append(m.group(1))
                 search_terms.add(m.group(1))
 
             # CICS TRANSID → ID de transacción
-            m = re.search(r"TRANSID\s*\(?['\"]?(\w+)['\"]?\)?", stripped, re.IGNORECASE)
+            m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?", 
+                         stripped, re.IGNORECASE)
             if m:
                 structured["cics_transactions"].append(m.group(1))
                 search_terms.add(m.group(1))
 
         return func.HttpResponse(
             json.dumps({
-                "search_terms": ", ".join(search_terms),  # ← AI Search: corto y preciso
-                "structured": structured,                  # ← GPT: contexto completo
-                "cleaned_text": ", ".join(search_terms)   # ← compatibilidad con flujo actual
+                "search_terms": ", ".join(search_terms),
+                "structured":   structured,
+                "cleaned_text": ", ".join(search_terms)
             }),
             mimetype="application/json",
             status_code=200
