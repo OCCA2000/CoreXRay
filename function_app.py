@@ -33,78 +33,123 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
         ]
 
         def remove_inline_comment(line):
-            """
-            Remueve comentario inline *> respetando strings literales.
-            En COBOL no puede haber codigo despues de *> fuera de string.
-            """
             in_string = False
             quote_char = None
             i = 0
-
             while i < len(line):
                 char = line[i]
-
                 if char in ('"', "'") and not in_string:
                     in_string = True
                     quote_char = char
-
                 elif char == quote_char and in_string:
-                    # Comilla escapada duplicada: 'it''s'
                     if i + 1 < len(line) and line[i + 1] == quote_char:
                         i += 2
                         continue
                     else:
                         in_string = False
                         quote_char = None
-
                 elif not in_string and char == '*' \
                         and i + 1 < len(line) and line[i + 1] == '>':
                     return line[:i].strip()
-
                 i += 1
-
             return line.strip()
+
+        def extract_tables_from_sql(sql):
+            tables = set()
+
+            # FROM tabla (ignora subqueries y keywords)
+            for m in re.finditer(r'\bFROM\s+([\w-]+)', sql, re.IGNORECASE):
+                name = m.group(1)
+                if name.upper() not in ('SELECT', 'WHERE', 'SET', '('):
+                    tables.add(name)
+
+            # JOIN tabla
+            for m in re.finditer(
+                r'\b(?:INNER|LEFT|RIGHT|FULL|CROSS)?\s*'
+                r'(?:OUTER\s+)?JOIN\s+([\w-]+)',
+                sql, re.IGNORECASE
+            ):
+                tables.add(m.group(1))
+
+            # INSERT INTO tabla
+            for m in re.finditer(
+                r'\bINSERT\s+INTO\s+([\w-]+)', sql, re.IGNORECASE
+            ):
+                tables.add(m.group(1))
+
+            # UPDATE tabla
+            for m in re.finditer(
+                r'\bUPDATE\s+([\w-]+)', sql, re.IGNORECASE
+            ):
+                tables.add(m.group(1))
+
+            # DELETE FROM tabla
+            for m in re.finditer(
+                r'\bDELETE\s+FROM\s+([\w-]+)', sql, re.IGNORECASE
+            ):
+                tables.add(m.group(1))
+
+            return tables
+
+        # --- Procesamiento de líneas ---
+        in_sql_block = False
+        sql_block = []
 
         for line in lines:
             stripped = line.strip()
 
-            # Ignorar líneas vacías
             if not stripped:
                 continue
-
-            # Tipo 1 y 2: comentario estándar (* o ** al inicio)
             if stripped.startswith('*'):
                 continue
-
-            # Tipo 3: salto de página (/ al inicio)
             if stripped.startswith('/'):
                 continue
-
-            # Tipo 5: línea de continuación (- en columna 7)
-            # Debe verificarse en la línea ORIGINAL, no en stripped
             if len(line) > 6 and line[6] == '-':
                 continue
 
-            # Tipo 4: comentario inline *> respetando strings literales
             stripped = remove_inline_comment(stripped)
             if not stripped:
                 continue
 
-            # CALL → agrega a structured Y search_terms
+            # Detectar inicio de bloque SQL
+            if re.search(r'\bEXEC\s+SQL\b', stripped, re.IGNORECASE):
+                in_sql_block = True
+                sql_block = []
+                continue
+
+            # Detectar fin de bloque SQL y procesar
+            if re.search(r'\bEND-EXEC\b', stripped, re.IGNORECASE):
+                if in_sql_block and sql_block:
+                    full_sql = ' '.join(sql_block)
+                    found_tables = extract_tables_from_sql(full_sql)
+                    structured["tables"].extend(found_tables)
+                    # ← NO se agrega a search_terms (decisión anterior)
+                in_sql_block = False
+                sql_block = []
+                continue
+
+            # Acumular líneas dentro de bloque SQL
+            if in_sql_block:
+                sql_block.append(stripped)
+                continue  # ← no procesar otras keywords dentro de SQL
+
+            # --- Fuera de bloque SQL ---
+
+            # CALL
             m = re.search(r"CALL\s+['\"]?([\w-]+)['\"]?",
                          stripped, re.IGNORECASE)
             if m:
                 structured["calls"].append(m.group(1))
                 search_terms.add(m.group(1))
 
-            # COPY → agrega a structured Y search_terms
+            # COPY
             m = re.search(r"COPY\s+([\w-]+)",
                          stripped, re.IGNORECASE)
             if m:
                 structured["copybooks"].append(m.group(1))
                 search_terms.add(m.group(1))
 
-            # FD → agrega a structured Y search_terms (sin sufijo)
+            # FD
             m = re.search(r"\bFD\s+([\w-]+)",
                          stripped, re.IGNORECASE)
             if m:
@@ -116,13 +161,7 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
                 structured["files"].append(file_name)
                 search_terms.add(file_name)
 
-            # FROM → SOLO a structured, NO a search_terms
-            m = re.search(r"\bFROM\s+([\w-]+)",
-                         stripped, re.IGNORECASE)
-            if m:
-                structured["tables"].append(m.group(1))
-
-            # TRANSID → agrega a structured Y search_terms
+            # TRANSID
             m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?",
                          stripped, re.IGNORECASE)
             if m:
@@ -142,7 +181,7 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
 
-        
+
 # --- FUNCTION 2: The PDF Converter ---
 # --- FUNCTION 2: The PDF Converter ---
 @app.function_name(name="ConvertTextOrHtmlToPdf")
