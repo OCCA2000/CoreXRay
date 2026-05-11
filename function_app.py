@@ -3,6 +3,9 @@ import json
 import io
 import re
 from fpdf import FPDF
+from azure.storage.blob import BlobServiceClient
+from azure.core.exceptions import ResourceNotFoundError
+import os
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -191,7 +194,6 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # --- FUNCTION 2: The PDF Converter ---
-# --- FUNCTION 2: The PDF Converter ---
 @app.function_name(name="ConvertTextOrHtmlToPdf")
 @app.route("", methods=["POST"])
 def ConvertTextOrHtmlToPdf(req: func.HttpRequest) -> func.HttpResponse:
@@ -244,3 +246,73 @@ def convert_to_pdf_with_fpdf(content: str) -> bytes:
     # Get PDF as bytes
     pdf_bytes = pdf.output(dest='S')
     return pdf_bytes
+
+# --- FUNCTION 3: The GetFilesByName / Reemplaza AI Search ---
+@app.function_name(name="GetFilesByName")
+@app.route("", methods=["POST"])
+def GetFilesByName(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        req_body = req.get_json()
+        search_terms = req_body.get('search_terms', '')
+        
+        if not search_terms:
+            return func.HttpResponse(
+                json.dumps({"files": []}),
+                mimetype="application/json",
+                status_code=200
+            )
+
+        # Parsear los nombres
+        names = [name.strip() for name in search_terms.split(',') if name.strip()]
+
+        # Connection string desde variables de entorno
+        connect_str = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+        blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        container_name = os.environ["AZURE_STORAGE_CONTAINER_NAME"]
+        container_client = blob_service_client.get_container_client(container_name)
+
+        results = []
+
+        for name in names:
+            found = False
+
+            # Buscar en cob/ primero, luego en pco/
+            search_paths = [
+                ("cob", f"cob/{name}.COB"),
+                ("pco", f"pco/{name}.PCO"),
+            ]
+
+            for folder, blob_path in search_paths:
+                try:
+                    blob_client = container_client.get_blob_client(blob_path)
+                    properties = blob_client.get_blob_properties()
+
+                    results.append({
+                        "name":          name,
+                        "path":          blob_path,
+                        "folder":        folder,
+                        "extension":     folder.upper(),
+                        "size":          properties.size,
+                        "last_modified": properties.last_modified.isoformat(),
+                        "found":         True
+                    })
+                    found = True
+                    break  # Si lo encontró en cob, no busca en pco
+
+                except ResourceNotFoundError:
+                    continue  # Intenta en la siguiente carpeta
+
+            if not found:
+                results.append({
+                    "name":  name,
+                    "found": False
+                })
+
+        return func.HttpResponse(
+            json.dumps({"files": results}),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
