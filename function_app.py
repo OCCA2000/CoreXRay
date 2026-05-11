@@ -15,14 +15,12 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
         raw_text = req_body.get('text', '')
         lines = raw_text.split('\n')
 
-        structured = {
-            "calls": [],
-            "copybooks": [],
-            "files": [],
-            "tables": [],
-            "cics_transactions": [],
-        }
-        search_terms = set()
+        # Contadores para cada campo
+        call_counts = {}
+        copybook_counts = {}
+        file_counts = {}
+        table_counts = {}
+        cics_counts = {}
 
         file_suffixes = [
             '-FILE-IN', '-FILE-OUT',
@@ -56,42 +54,30 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
 
         def extract_tables_from_sql(sql):
             tables = set()
-
-            # FROM tabla (ignora subqueries y keywords)
             for m in re.finditer(r'\bFROM\s+([\w-]+)', sql, re.IGNORECASE):
                 name = m.group(1)
                 if name.upper() not in ('SELECT', 'WHERE', 'SET', '('):
                     tables.add(name)
-
-            # JOIN tabla
             for m in re.finditer(
                 r'\b(?:INNER|LEFT|RIGHT|FULL|CROSS)?\s*'
                 r'(?:OUTER\s+)?JOIN\s+([\w-]+)',
                 sql, re.IGNORECASE
             ):
                 tables.add(m.group(1))
-
-            # INSERT INTO tabla
             for m in re.finditer(
                 r'\bINSERT\s+INTO\s+([\w-]+)', sql, re.IGNORECASE
             ):
                 tables.add(m.group(1))
-
-            # UPDATE tabla
             for m in re.finditer(
                 r'\bUPDATE\s+([\w-]+)', sql, re.IGNORECASE
             ):
                 tables.add(m.group(1))
-
-            # DELETE FROM tabla
             for m in re.finditer(
                 r'\bDELETE\s+FROM\s+([\w-]+)', sql, re.IGNORECASE
             ):
                 tables.add(m.group(1))
-
             return tables
 
-        # --- Procesamiento de líneas ---
         in_sql_block = False
         sql_block = []
 
@@ -111,43 +97,38 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
             if not stripped:
                 continue
 
-            # Detectar inicio de bloque SQL
             if re.search(r'\bEXEC\s+SQL\b', stripped, re.IGNORECASE):
                 in_sql_block = True
                 sql_block = []
                 continue
 
-            # Detectar fin de bloque SQL y procesar
             if re.search(r'\bEND-EXEC\b', stripped, re.IGNORECASE):
                 if in_sql_block and sql_block:
                     full_sql = ' '.join(sql_block)
                     found_tables = extract_tables_from_sql(full_sql)
-                    structured["tables"].extend(found_tables)
-                    # ← NO se agrega a search_terms (decisión anterior)
+                    for table in found_tables:
+                        table_counts[table] = table_counts.get(table, 0) + 1
                 in_sql_block = False
                 sql_block = []
                 continue
 
-            # Acumular líneas dentro de bloque SQL
             if in_sql_block:
                 sql_block.append(stripped)
-                continue  # ← no procesar otras keywords dentro de SQL
-
-            # --- Fuera de bloque SQL ---
+                continue
 
             # CALL
             m = re.search(r"CALL\s+['\"]?([\w-]+)['\"]?",
                          stripped, re.IGNORECASE)
             if m:
-                structured["calls"].append(m.group(1))
-                search_terms.add(m.group(1))
+                name = m.group(1)
+                call_counts[name] = call_counts.get(name, 0) + 1
 
             # COPY
             m = re.search(r"COPY\s+([\w-]+)",
                          stripped, re.IGNORECASE)
             if m:
-                structured["copybooks"].append(m.group(1))
-                search_terms.add(m.group(1))
+                name = m.group(1)
+                copybook_counts[name] = copybook_counts.get(name, 0) + 1
 
             # FD
             m = re.search(r"\bFD\s+([\w-]+)",
@@ -158,21 +139,48 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
                     if file_name.upper().endswith(suffix.upper()):
                         file_name = file_name[:len(file_name)-len(suffix)]
                         break
-                structured["files"].append(file_name)
-                search_terms.add(file_name)
+                file_counts[file_name] = file_counts.get(file_name, 0) + 1
 
             # TRANSID
             m = re.search(r"TRANSID\s*\(?['\"]?([\w-]+)['\"]?\)?",
                          stripped, re.IGNORECASE)
             if m:
-                structured["cics_transactions"].append(m.group(1))
-                search_terms.add(m.group(1))
+                name = m.group(1)
+                cics_counts[name] = cics_counts.get(name, 0) + 1
+
+        # structured: valores únicos (keys de cada contador)
+        structured = {
+            "calls":             list(call_counts.keys()),
+            "copybooks":         list(copybook_counts.keys()),
+            "files":             list(file_counts.keys()),
+            "tables":            list(table_counts.keys()),
+            "cics_transactions": list(cics_counts.keys()),
+        }
+
+        # search_terms: solo CALLs únicos, sin conteo
+        search_terms = ", ".join(call_counts.keys())
+
+        # cleaned_text: todos los campos con conteo
+        def format_counts(label, counts):
+            if not counts:
+                return None
+            items = ", ".join(f"{name} ({count})" for name, count in counts.items())
+            return f"{label}: {items}"
+
+        cleaned_parts = filter(None, [
+            format_counts("CALLS",     call_counts),
+            format_counts("COPYBOOKS", copybook_counts),
+            format_counts("FILES",     file_counts),
+            format_counts("TABLES",    table_counts),
+            format_counts("CICS",      cics_counts),
+        ])
+        cleaned_text = " | ".join(cleaned_parts)
 
         return func.HttpResponse(
             json.dumps({
-                "search_terms": ", ".join(search_terms),
+                "search_terms": search_terms,
                 "structured":   structured,
-                "cleaned_text": ", ".join(search_terms)
+                "cleaned_text": cleaned_text
             }),
             mimetype="application/json",
             status_code=200
