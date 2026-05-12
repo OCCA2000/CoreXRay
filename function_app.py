@@ -316,3 +316,100 @@ def GetFilesByName(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+
+
+# --- FUNCTION 4: CleanComments / Codigo sin comentarios ---
+@app.function_name(name="CleanComments")
+@app.route("", methods=["POST"])
+def CleanComments(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        req_body = req.get_json()
+        raw_text = req_body.get('text', '')
+        lines = raw_text.split('\n')
+
+        total_lines = len(lines)
+        removed_lines = 0
+        clean_lines = []
+        last_code_line = None
+
+        def remove_inline_comment(line):
+            in_string = False
+            quote_char = None
+            i = 0
+            while i < len(line):
+                char = line[i]
+                if char in ('"', "'") and not in_string:
+                    in_string = True
+                    quote_char = char
+                elif char == quote_char and in_string:
+                    if i + 1 < len(line) and line[i + 1] == quote_char:
+                        i += 2
+                        continue
+                    else:
+                        in_string = False
+                        quote_char = None
+                elif not in_string and char == '*' \
+                        and i + 1 < len(line) and line[i + 1] == '>':
+                    return line[:i].strip()
+                i += 1
+            return line.strip()
+
+        for line in lines:
+            # Línea vacía — conservar para estructura visual
+            if not line.strip():
+                clean_lines.append('')
+                continue
+
+            # Obtener indicador en columna 7 (índice 6)
+            indicator = line[6] if len(line) > 6 else ' '
+
+            # Comentario con * o /
+            if indicator in ('*', '/'):
+                removed_lines += 1
+                continue
+
+            # Línea de continuación — unir con la línea anterior
+            if indicator == '-':
+                removed_lines += 1
+                # El contenido útil empieza en columna 12 (índice 11)
+                continuation_text = line[11:].strip() if len(line) > 11 else ''
+                if last_code_line is not None and continuation_text:
+                    # Quitar la comilla de cierre del final de la línea anterior
+                    # y la comilla de apertura del inicio de la continuación
+                    prev = clean_lines[last_code_line]
+                    if prev.endswith("'") and continuation_text.startswith("'"):
+                        clean_lines[last_code_line] = prev[:-1] + continuation_text[1:]
+                    elif prev.endswith('"') and continuation_text.startswith('"'):
+                        clean_lines[last_code_line] = prev[:-1] + continuation_text[1:]
+                    else:
+                        clean_lines[last_code_line] = prev + ' ' + continuation_text
+                continue
+
+            # Línea de código normal — limpiar comentario inline
+            cleaned = remove_inline_comment(line)
+            if cleaned:
+                last_code_line = len(clean_lines)
+                clean_lines.append(cleaned)
+            else:
+                removed_lines += 1
+
+        clean_code = '\n'.join(clean_lines)
+        clean_line_count = total_lines - removed_lines
+        comment_percentage = round((removed_lines / total_lines) * 100, 2) if total_lines > 0 else 0.0
+
+        return func.HttpResponse(
+            json.dumps({
+                "clean_code": clean_code,
+                "metadata": {
+                    "total_lines":         total_lines,
+                    "removed_lines":       removed_lines,
+                    "clean_lines":         clean_line_count,
+                    "comment_percentage":  comment_percentage
+                }
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
