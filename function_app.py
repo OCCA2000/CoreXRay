@@ -430,19 +430,17 @@ def SearchAndClassify(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400
             )
 
-        # Credenciales desde variables de entorno
         aisearch_endpoint = os.environ["AISEARCH_ENDPOINT"]
         aisearch_key = os.environ["AISEARCH_KEY"]
         index_name = os.environ.get("AISEARCH_INDEX", "index-corexray-documents")
 
-        # Búsqueda en AI Search
         search_url = f"{aisearch_endpoint}/indexes/{index_name}/docs/search?api-version=2024-07-01"
         
         payload = {
             "search": program_name,
             "queryType": "full",
             "searchMode": "all",
-            "select": "metadata_storage_name, content",
+            "select": "metadata_storage_name",
             "top": 20
         }
 
@@ -455,33 +453,25 @@ def SearchAndClassify(req: func.HttpRequest) -> func.HttpResponse:
         response.raise_for_status()
         search_results = response.json().get("value", [])
 
-        # Clasificación
         articulos = []
         metricas = []
         procesos = []
 
         for doc in search_results:
             name = doc.get("metadata_storage_name", "")
-            content = doc.get("content", "")
-            
-            entry = {
-                "name": name,
-                "content": content
-            }
-
             name_lower = name.lower()
 
             if name_lower.endswith(".pdf"):
-                articulos.append(entry)
+                articulos.append({"name": name})
 
             elif name_lower.endswith(".txt") and "_output_" in name_lower:
-                metricas.append({**entry, "tipo": "log"})
+                metricas.append({"name": name, "tipo": "log"})
 
             elif name_lower.endswith(".out"):
-                metricas.append({**entry, "tipo": "sysout"})
+                metricas.append({"name": name, "tipo": "sysout"})
 
             elif "." not in name:
-                procesos.append(entry)
+                procesos.append({"name": name})
 
         return func.HttpResponse(
             json.dumps({
