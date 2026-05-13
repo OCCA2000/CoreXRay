@@ -440,7 +440,7 @@ def SearchAndClassify(req: func.HttpRequest) -> func.HttpResponse:
             "search": program_name,
             "queryType": "full",
             "searchMode": "all",
-            "select": "metadata_storage_name",
+            "select": "metadata_storage_name, content",
             "top": 20
         }
 
@@ -459,10 +459,15 @@ def SearchAndClassify(req: func.HttpRequest) -> func.HttpResponse:
 
         for doc in search_results:
             name = doc.get("metadata_storage_name", "")
+            content = doc.get("content", "")
             name_lower = name.lower()
 
             if name_lower.endswith(".pdf"):
-                articulos.append({"name": name})
+                # Artículos incluyen content directamente desde AI Search
+                articulos.append({
+                    "name": name,
+                    "content": content
+                })
 
             elif name_lower.endswith(".txt") and "_output_" in name_lower:
                 metricas.append({"name": name, "tipo": "log"})
