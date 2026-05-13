@@ -120,6 +120,13 @@ def CleanData(req: func.HttpRequest) -> func.HttpResponse:
                 sql_block.append(stripped)
                 continue
 
+            # TABLES via MOVE "NOMBRETABLA" TO DBIOMOD-FILE
+            m = re.search(r'\bMOVE\s+"([\w-]+)"\s+TO\s+DBIOMOD-FILE\b',
+                        stripped, re.IGNORECASE)
+            if m:
+                name = m.group(1)
+                table_counts[name] = table_counts.get(name, 0) + 1
+                
             # CALL
             m = re.search(r"CALL\s+['\"]?([\w-]+)['\"]?",
                          stripped, re.IGNORECASE)
