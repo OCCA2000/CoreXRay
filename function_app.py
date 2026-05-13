@@ -6,6 +6,7 @@ from fpdf import FPDF
 from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 import os
+import requests
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -413,3 +414,94 @@ def CleanComments(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+
+# --- FUNCTION 5: SearchAndClassify / Busqueda en AI Search y clasificacion: articulos, metricas (logs y sysout), procesos (catjobs) ---
+@app.function_name(name="SearchAndClassify")
+@app.route("", methods=["POST"])
+def SearchAndClassify(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        req_body = req.get_json()
+        program_name = req_body.get('program_name', '').strip()
+
+        if not program_name:
+            return func.HttpResponse(
+                json.dumps({"error": "program_name is required"}),
+                mimetype="application/json",
+                status_code=400
+            )
+
+        # Credenciales desde variables de entorno
+        aisearch_endpoint = os.environ["AISEARCH_ENDPOINT"]
+        aisearch_key = os.environ["AISEARCH_KEY"]
+        index_name = os.environ.get("AISEARCH_INDEX", "index-corexray-documents")
+
+        # Búsqueda en AI Search
+        search_url = f"{aisearch_endpoint}/indexes/{index_name}/docs/search?api-version=2024-07-01"
+        
+        payload = {
+            "search": program_name,
+            "queryType": "full",
+            "searchMode": "all",
+            "select": "metadata_storage_name, content",
+            "top": 20
+        }
+
+        headers = {
+            "api-key": aisearch_key,
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(search_url, json=payload, headers=headers)
+        response.raise_for_status()
+        search_results = response.json().get("value", [])
+
+        # Clasificación
+        articulos = []
+        metricas = []
+        procesos = []
+
+        for doc in search_results:
+            name = doc.get("metadata_storage_name", "")
+            content = doc.get("content", "")
+            
+            entry = {
+                "name": name,
+                "content": content
+            }
+
+            name_lower = name.lower()
+
+            if name_lower.endswith(".pdf"):
+                articulos.append(entry)
+
+            elif name_lower.endswith(".txt") and "_output_" in name_lower:
+                metricas.append({**entry, "tipo": "log"})
+
+            elif name_lower.endswith(".out"):
+                metricas.append({**entry, "tipo": "sysout"})
+
+            elif "." not in name:
+                procesos.append(entry)
+
+        return func.HttpResponse(
+            json.dumps({
+                "articulos": articulos,
+                "metricas": metricas,
+                "procesos": procesos
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except requests.exceptions.RequestException as e:
+        return func.HttpResponse(
+            json.dumps({"error": f"AI Search error: {str(e)}"}),
+            mimetype="application/json",
+            status_code=500
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
